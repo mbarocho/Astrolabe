@@ -18,6 +18,9 @@ intents.members = True
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
+with open("event_forum_channels.json", "r") as f:
+    GUILD_FORUM_CHANNELS = json.load(f)
+
 # PostgreSQL connection pool
 async def connect_to_db():
     pool = await asyncpg.create_pool(
@@ -144,6 +147,16 @@ async def add(interaction: discord.Interaction,
         
     try:
         await create_discord_event(guild, title, description, event_datetime_est, location, channel)
+            # Create a forum post if a forum channel is configured for the guild
+        forum_channel_id = GUILD_FORUM_CHANNELS.get(str(guild.id))
+        if forum_channel_id:
+            await create_forum_post(guild, forum_channel_id, title, description, event_datetime_est)
+        else:
+            await interaction.followup.send("No forum channel configured for this server.", ephemeral=True)
+
+
+
+        await create_forum_post(guild, channel, title, description, event_datetime_est)
         await interaction.response.send_message(
             f"{interaction.user.mention} added **{title}** and created a Discord event!",
             ephemeral=False
@@ -229,8 +242,6 @@ async def event(interaction: discord.Interaction, title: str, date: str, time: s
     except ValueError:
         await interaction.followup.send("Invalid date or time format. Please use MM/DD/YYYY and HH:MM AM/PM.", ephemeral=True)
         return
-
-    await handle_event_voting(vote_message, title, event_datetime_est, interaction.guild, interaction.channel)
     return
 
 async def create_discord_event(guild, title: str, description: str, event_datetime_est, location: str, channel: discord.abc.Messageable):
@@ -247,6 +258,17 @@ async def create_discord_event(guild, title: str, description: str, event_dateti
         )
         await channel.send(f"Join us in **{title}** on {event_datetime_est.strftime('%m/%d/%Y at %I:%M %p')}!" + f" [Event Link]({event.url})")
     except Exception as e:
-        await channel.send(f"Failed to create the event due to an error: {e}") 
+        await channel.send(f"Failed to create the event due to an error: {e}")
+
+async def create_forum_post(guild, forum_channel_id: int, title: str, description: str, event_datetime_est):
+    forum_channel = droid.get_channel(forum_channel_id)
+    try:
+        thread = await forum_channel.create_thread(
+            name=title,
+            content=f"Discussion thread for **{title}** happening on {event_datetime_est.strftime('%m/%d/%Y at %I:%M %p')}!\n\n{description}",
+            reason="Discussion for the upcoming event."
+        )
+    except Exception as e:
+        await forum_channel.send(f"Failed to create the discussion thread due to an error: {e}")
 
 droid.run(TOKEN)

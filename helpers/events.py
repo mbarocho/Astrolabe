@@ -28,9 +28,10 @@ async def create_forum_post(guild: discord.Guild, forum_channel_id: int, title: 
 
     post_title = f"{title} ({event_time.strftime('%b %d, %I:%M %p')})"
     try:
-        await forum_channel.create_thread(
+        eventThread = await forum_channel.create_thread(
             name=post_title,
             content=description
         )
+        return eventThread.message.jump_url
     except Exception as e:
         raise RuntimeError(f"Failed to create forum post: {e}")

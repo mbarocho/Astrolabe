@@ -15,7 +15,7 @@ class AddEventModal(Modal):
         self.title_input = TextInput(label="Event Title", placeholder="Movie Night", max_length=100)
         self.date_input = TextInput(label="Date (MM/DD/YYYY)", placeholder="01/01/1970")
         self.time_input = TextInput(label="Time (HH:MM AM/PM)", placeholder="12:00 AM")
-        self.location_input = TextInput(label="Location", placeholder="New York City, NY")
+        self.location_input = TextInput(label="Location", placeholder="Times Square - New York, NY")
         self.description_input = TextInput(
             label="Description", 
             style=discord.TextStyle.paragraph, 

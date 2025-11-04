@@ -30,7 +30,7 @@ class AddEventModal(Modal):
         self.add_item(self.description_input)
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer(thinking=True)
         title = self.title_input.value
         date = self.date_input.value
         time = self.time_input.value
@@ -67,18 +67,18 @@ class AddEventModal(Modal):
             )
 
         try:
-            # Your existing helper (assumes it’s defined elsewhere)
             await create_discord_event(guild, title, description, event_datetime_est, location, channel)
 
             forum_channel_id = self.GUILD_FORUM_CHANNELS.get(str(guild.id))
             if forum_channel_id:
-                await create_forum_post(guild, forum_channel_id, title, description, event_datetime_est)
+                eventThreadLink = await create_forum_post(guild, forum_channel_id, title, description, event_datetime_est)
+                await interaction.followup.send(
+                    f"Join us for **{title}** on {date} in {location}!\n"
+                    f"Discuss more in the forum channel: {eventThreadLink}",
+                    ephemeral=False
+                )
             else:
                 await interaction.followup.send("No forum channel configured for this server.", ephemeral=True)
-
-            await interaction.followup.send(
-                f"Join us for **{title}** on {date} in {location}!",
-            )
 
         except Exception as e:
             await interaction.followup.send(

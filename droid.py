@@ -8,6 +8,7 @@ from eventCatalog import *
 from datetime import datetime, timedelta, timezone
 import pytz
 import asyncpg
+from eventModal import AddEventModal
 
 
 intents = discord.Intents.default()
@@ -17,6 +18,9 @@ intents.members = True
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
+
+with open("event_forum_channels.json", "r") as f:
+    GUILD_FORUM_CHANNELS = json.load(f)
 
 # PostgreSQL connection pool
 async def connect_to_db():
@@ -73,25 +77,25 @@ droid = droid()
 async def help(interaction: discord.Interaction):
     message = (
         "```"
-        f"1. /backlog - Load server's event backlog.\n"
+        f"1. /calendar - Load server's event calendar.\n"
         f"2. /add - Add events to the server.\n"
         f"3. /remove - Remove events from the server.\n"
-        f"4. /search - Search for content in the server's event backlog.\n"
+        f"4. /search - Search for content in the server's event calendar.\n"
         f"5. /help - Lists commands used by EventBot.\n"
         "```"
     )
     await interaction.response.send_message(message)
 
 # Commands Setup
-@droid.tree.command(name="backlog", description="Load server's event backlog.")
-# Output Backlog in Discord
+@droid.tree.command(name="calendar", description="Load server's event calendar.")
+# Output calendar in Discord
 async def load(interaction: discord.Interaction):
     guild_id = interaction.guild.id
     async with db_pool.acquire() as conn:
-        # Fetch backlog from the database
+        # Fetch calendar from the database
         rows = await conn.fetch("SELECT title, date, location, description FROM events WHERE guild_id = $1", guild_id)
     if not rows:
-        await interaction.response.send_message("Backlog is empty. Please add content to be displayed.", ephemeral=True)
+        await interaction.response.send_message("calendar is empty. Please add content to be displayed.", ephemeral=True)
         return
     message = ""
     for row in rows:
@@ -109,50 +113,10 @@ async def load(interaction: discord.Interaction):
         await interaction.response.send_message(message)
 
 @droid.tree.command(name="add", description="Add events to the server.")
-# Add to backlog via Discord
-async def add(interaction: discord.Interaction, 
-              title: str, 
-              date: str, 
-              time: str,
-              location: str,
-              description: str, 
-    ):
-    guild_id = interaction.guild.id
-    guild = interaction.guild
-    channel = interaction.channel
-
-    try:
-        event_datetime = datetime.strptime(f"{date} {time}", "%m/%d/%Y %I:%M %p")
-        est = pytz.timezone("America/New_York")
-        event_datetime_est = est.localize(event_datetime)
-    except ValueError:
-        await interaction.followup.send("Invalid date or time format. Please use MM/DD/YYYY and HH:MM AM/PM.", ephemeral=True)
-        return
-
-    async with db_pool.acquire() as conn:
-        exists = await conn.fetchval(
-            "SELECT 1 FROM events WHERE guild_id = $1 AND title = $2", guild_id, title
-        )
-        if exists:
-            await interaction.response.send_message("This item is already in the event list.")
-            return
-        await conn.execute(
-            "INSERT INTO events (guild_id, title, date, location, description) VALUES ($1, $2, $3, $4, $5)",
-            guild_id, title, date, location, description
-        )
-        
-        
-    try:
-        await create_discord_event(guild, title, description, event_datetime_est, location, channel)
-        await interaction.response.send_message(
-            f"{interaction.user.mention} added **{title}** and created a Discord event!",
-            ephemeral=False
-        )
-    except Exception as e:
-        await interaction.response.send_message(
-            f"Event added to the database, but failed to create Discord event: {e}",
-            ephemeral=True
-        )
+# Add to calendar via Discord
+async def add(interaction: discord.Interaction):
+    modal = AddEventModal(db_pool=db_pool, GUILD_FORUM_CHANNELS=GUILD_FORUM_CHANNELS)
+    await interaction.response.send_modal(modal)
 
 @droid.tree.command(name="remove", description="Remove content from the server's event list.")
 async def remove(interaction: discord.Interaction, query: str):
@@ -229,24 +193,17 @@ async def event(interaction: discord.Interaction, title: str, date: str, time: s
     except ValueError:
         await interaction.followup.send("Invalid date or time format. Please use MM/DD/YYYY and HH:MM AM/PM.", ephemeral=True)
         return
-
-    await handle_event_voting(vote_message, title, event_datetime_est, interaction.guild, interaction.channel)
     return
 
-async def create_discord_event(guild, title: str, description: str, event_datetime_est, location: str, channel: discord.abc.Messageable):
+async def create_forum_post(guild, forum_channel_id: int, title: str, description: str, event_datetime_est):
+    forum_channel = droid.get_channel(forum_channel_id)
     try:
-        # Create the scheduled event in the guild
-        event = await guild.create_scheduled_event(
-            name=f"{title}",
-            description=f"{description}!",
-            start_time=event_datetime_est,
-            end_time=event_datetime_est + timedelta(hours=3),
-            privacy_level=discord.PrivacyLevel.guild_only,
-            entity_type=discord.EntityType.external,
-            location=f"{location}"
+        thread = await forum_channel.create_thread(
+            name=title,
+            content=f"Discussion thread for **{title}** happening on {event_datetime_est.strftime('%m/%d/%Y at %I:%M %p')}!\n\n{description}",
+            reason="Discussion for the upcoming event."
         )
-        await channel.send(f"Join us in **{title}** on {event_datetime_est.strftime('%m/%d/%Y at %I:%M %p')}!" + f" [Event Link]({event.url})")
     except Exception as e:
-        await channel.send(f"Failed to create the event due to an error: {e}") 
+        await forum_channel.send(f"Failed to create the discussion thread due to an error: {e}")
 
 droid.run(TOKEN)

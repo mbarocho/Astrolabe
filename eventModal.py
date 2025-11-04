@@ -77,8 +77,7 @@ class AddEventModal(Modal):
                 await interaction.followup.send("No forum channel configured for this server.", ephemeral=True)
 
             await interaction.followup.send(
-                f"✅ {interaction.user.mention} added **{title}** and created a Discord event!",
-                ephemeral=False
+                f"Join us for **{title}** on {date} in {location}!",
             )
 
         except Exception as e:

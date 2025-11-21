@@ -4,10 +4,11 @@ import json
 from discord.ext import commands
 from dotenv import load_dotenv
 from eventCatalog import *
-from datetime import datetime, timedelta, timezone
+import datetime
 import pytz
 import asyncpg
 from eventModal import AddEventModal
+from calendarModal import get_upcoming_events
 
 
 intents = discord.Intents.default()
@@ -53,35 +54,35 @@ db_pool = None
 class BotStatusView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+        self.db_pool = db_pool
+        self.GUILD_FORUM_CHANNELS = GUILD_FORUM_CHANNELS
 
     @discord.ui.button(label="Add Event", style=discord.ButtonStyle.green)
     async def add_event_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        modal = AddEventModal(db_pool=db_pool, GUILD_FORUM_CHANNELS=GUILD_FORUM_CHANNELS)
+        modal = AddEventModal(db_pool=self.db_pool, GUILD_FORUM_CHANNELS=self.GUILD_FORUM_CHANNELS)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="View Calendar", style=discord.ButtonStyle.blurple)
+    @discord.ui.button(label="View Calendar", style=discord.ButtonStyle.primary)
     async def view_calendar_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()
-        
-        # Load calendar
-        guild_id = interaction.guild.id
-        async with db_pool.acquire() as conn:
-            rows = await conn.fetch("SELECT title, date, location, description FROM events WHERE guild_id = $1", guild_id)
-        if not rows:
-            await interaction.response.send_message("calendar is empty. Please add content to be displayed.", ephemeral=True)
-            return
-        message = ""
-        for row in rows:
-            message += (
-                f"**{row['title']}** ({row['date']})\n"
-                f"{row['description']}\n"
-                f"Location: {row['location']}\n"
+        try:
+            # Fetch the upcoming events
+            events_message = await get_upcoming_events(self.db_pool, interaction.guild.id)
+
+            # Create the embed with the events
+            embed = discord.Embed(
+                title="Upcoming Events",
+                description=events_message,
+                color=discord.Color.blue()
             )
-        if len(message) > 2000:
-            for chunk in [message[i:i+2000] for i in range(0, len(message), 2000)]:
-                await interaction.followup.send(chunk)
-        else:
-            await interaction.followup.send(message)
+
+            # Send the embed with the buttons
+            await interaction.response.send_message(embed=embed, view=self)
+            print("Embed sent successfully.")
+
+        except Exception as e:
+            print(f"Error sending embed: {e}")
+            await interaction.followup.send("There was an error sending the calendar.", ephemeral=True)
+
 
 async def send_status_panel(guild, channel_id, message_id=None):
     channel = guild.get_channel(channel_id)
@@ -94,16 +95,18 @@ async def send_status_panel(guild, channel_id, message_id=None):
         color=discord.Color.green()
     )
 
+    view = BotStatusView()
+
     if message_id:
         try:
             msg = await channel.fetch_message(message_id)
-            await msg.edit(embed=embed, view=BotStatusView())
+            await msg.edit(embed=embed, view=view)
             return msg.id
         except:
             pass
 
     # Create a fresh message
-    msg = await channel.send(embed=embed, view=BotStatusView())
+    msg = await channel.send(embed=embed, view=view)
     return msg.id
 
 
@@ -170,7 +173,7 @@ async def help(interaction: discord.Interaction):
 async def load(interaction: discord.Interaction):
     guild_id = interaction.guild.id
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT title, date, location, description FROM events WHERE guild_id = $1", guild_id)
+        rows = await conn.fetch("SELECT title, date, time, location, description FROM events WHERE guild_id = $1", guild_id)
     if not rows:
         await interaction.response.send_message("calendar is empty. Please add content to be displayed.", ephemeral=True)
         return
@@ -178,6 +181,7 @@ async def load(interaction: discord.Interaction):
     for row in rows:
         message += (
             f"**{row['title']}** ({row['date']})\n"
+            f"Time: {row['time']}\n"
             f"{row['description']}\n"
             f"Location: {row['location']}\n"
         )
@@ -214,7 +218,7 @@ async def search(interaction: discord.Interaction, query: str):
     guild_id = interaction.guild.id
     async with db_pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT title, location, date, description FROM events WHERE guild_id = $1", guild_id
+            "SELECT title, location, date, time, description FROM events WHERE guild_id = $1", guild_id
         )
     if not rows:
         await interaction.response.send_message(
@@ -228,6 +232,7 @@ async def search(interaction: discord.Interaction, query: str):
         message += (
             f"{item['title']}\n"
             f"Date: {item['date']}\n"
+            f"Time: {item['time']}\n"
             f"Location: {item['location']}\n"
             f"Description: {item['description']}\n"
         )

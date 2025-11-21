@@ -73,13 +73,12 @@ class AddEventModal(Modal):
             if forum_channel_id:
                 eventThreadLink = await create_forum_post(guild, forum_channel_id, title, description, event_datetime_est)
 
-                 # Create embed
+                # Create embed
                 embed = discord.Embed(
                     title=f"Join us for {title}!",
                     description=f"**Date:** {date}\n**Time:** {time}\n**Location:** {location}\n\nDiscuss more in the forum channel: [Click Here]({eventThreadLink})",
                     color=discord.Color.dark_gold()
                 )
-
                 await interaction.followup.send(embed=embed, ephemeral=False)
             else:
                 await interaction.followup.send("No forum channel configured for this server.", ephemeral=True)

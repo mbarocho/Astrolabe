@@ -1,4 +1,3 @@
-import asyncio
 import os
 import discord
 import json
@@ -50,6 +49,64 @@ async def init_db():
 
 db_pool = None
 
+# Control Panel
+class BotStatusView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Add Event", style=discord.ButtonStyle.green)
+    async def add_event_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = AddEventModal(db_pool=db_pool, GUILD_FORUM_CHANNELS=GUILD_FORUM_CHANNELS)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="View Calendar", style=discord.ButtonStyle.blurple)
+    async def view_calendar_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        
+        # Load calendar
+        guild_id = interaction.guild.id
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch("SELECT title, date, location, description FROM events WHERE guild_id = $1", guild_id)
+        if not rows:
+            await interaction.response.send_message("calendar is empty. Please add content to be displayed.", ephemeral=True)
+            return
+        message = ""
+        for row in rows:
+            message += (
+                f"**{row['title']}** ({row['date']})\n"
+                f"{row['description']}\n"
+                f"Location: {row['location']}\n"
+            )
+        if len(message) > 2000:
+            for chunk in [message[i:i+2000] for i in range(0, len(message), 2000)]:
+                await interaction.followup.send(chunk)
+        else:
+            await interaction.followup.send(message)
+
+async def send_status_panel(guild, channel_id, message_id=None):
+    channel = guild.get_channel(channel_id)
+    if not channel:
+        return None
+
+    embed = discord.Embed(
+        title="Astrolabe Control Panel",
+        description="Astrolabe is **Online**.",
+        color=discord.Color.green()
+    )
+
+    if message_id:
+        try:
+            msg = await channel.fetch_message(message_id)
+            await msg.edit(embed=embed, view=BotStatusView())
+            return msg.id
+        except:
+            pass
+
+    # Create a fresh message
+    msg = await channel.send(embed=embed, view=BotStatusView())
+    return msg.id
+
+
 # Discord bot instance
 class droid(commands.Bot):
     def __init__(self):
@@ -59,9 +116,31 @@ class droid(commands.Bot):
         global db_pool
         db_pool = await connect_to_db()
         await init_db()
-        print(f'{self.user} has interfaced with PostgreSQL!')
-        print(f'{self.user} has connected to Discord!')
+        print(f'{self.user} has interfaced with PostgreSQL and connected to Discord!')
         await self.tree.sync()
+
+        for guild in self.guilds:
+            async with db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT guild_id, status_channel_id, status_message_id FROM guild_settings WHERE guild_id = $1",
+                    guild.id
+                )
+
+            channel_id = row["status_channel_id"] if row else (guild.system_channel.id if guild.system_channel else None)
+            if not channel_id:
+                continue
+
+            message_id = row["status_message_id"] if row else None
+            new_msg_id = await send_status_panel(guild, channel_id, message_id)
+
+            async with db_pool.acquire() as conn:
+                await conn.execute("""
+                    INSERT INTO guild_settings (guild_id, status_channel_id, status_message_id)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (guild_id) DO UPDATE
+                    SET status_channel_id = EXCLUDED.status_channel_id,
+                        status_message_id = EXCLUDED.status_message_id
+                """, guild.id, channel_id, new_msg_id)
 
         filename = "event_catalog.json"
         if not os.path.exists(filename):
@@ -88,11 +167,9 @@ async def help(interaction: discord.Interaction):
 
 # Commands Setup
 @droid.tree.command(name="calendar", description="Load server's event calendar.")
-# Output calendar in Discord
 async def load(interaction: discord.Interaction):
     guild_id = interaction.guild.id
     async with db_pool.acquire() as conn:
-        # Fetch calendar from the database
         rows = await conn.fetch("SELECT title, date, location, description FROM events WHERE guild_id = $1", guild_id)
     if not rows:
         await interaction.response.send_message("calendar is empty. Please add content to be displayed.", ephemeral=True)

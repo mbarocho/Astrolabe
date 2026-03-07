@@ -26,7 +26,7 @@ async def create_forum_post(guild: discord.Guild, forum_channel_id: int, title: 
     if not forum_channel:
         raise RuntimeError(f"Forum channel with ID {forum_channel_id} not found.")
 
-    post_title = f"{title} ({event_time.strftime('%b %d, %I:%M %p')})"
+    post_title = f"{title} Event Chat"
     try:
         eventThread = await forum_channel.create_thread(
             name=post_title,

@@ -5,13 +5,11 @@ import pytz
 
 from helpers.events import create_discord_event, create_forum_post
 
-db_pool = None
-
 class AddEventModal(Modal):
-    def __init__(self, db_pool, GUILD_FORUM_CHANNELS):
+    def __init__(self, event_repository, GUILD_FORUM_CHANNELS):
         super().__init__(title="Add Event")
 
-        self.db_pool = db_pool
+        self.event_repository = event_repository
         self.GUILD_FORUM_CHANNELS = GUILD_FORUM_CHANNELS
 
         # Define the fields (can customize label, style, placeholder, etc.)
@@ -68,18 +66,22 @@ class AddEventModal(Modal):
 
         # Check if event already exists in the database
         try:
-            async with self.db_pool.acquire() as conn:
-                exists = await conn.fetchval(
-                    "SELECT 1 FROM events WHERE guild_id = $1 AND title = $2", guild_id, title
-                )
-                if exists:
-                    await interaction.followup.send("That event already exists.", ephemeral=True)
-                    return
+            exists = await self.event_repository.exists(guild_id, title)
 
-                await conn.execute(
-                    "INSERT INTO events (guild_id, title, date, time, location, description) VALUES ($1, $2, $3, $4, $5, $6)",
-                    guild_id, title, date, time, location, description
-                )
+            if exists:
+                await interaction.followup.send("That event already exists.", ephemeral=True)
+                return
+
+            event_dict = {
+                "guild_id": guild_id,
+                "title": title,
+                "date": date,
+                "time": time,
+                "location": location,
+                "description": description
+            }
+            await self.event_repository.add(event_dict)
+
         except Exception as e:
             await interaction.followup.send(
                 f"An error occurred while adding the event to the database: {e}",
